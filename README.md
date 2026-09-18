@@ -137,15 +137,7 @@ data/
 
 ---
 
-## Setup
 
-```bash
-git clone <repo-url> && cd stock-alpha
-pip install -r requirements.txt
-
-cp config/db_config.example.py db_config.py
-# edit db_config.py with your credentials
-```
 
 PostgreSQL:
 
