@@ -1,0 +1,39 @@
+# Credentials — never commit
+db_config.py
+*.env
+.env
+
+# Data and outputs
+*.db
+*.pkl
+*.csv
+!data/ticker_sectors.csv
+*.log
+*.png
+logs/
+archive/
+
+# Result files, regenerated on every run
+live_signals.json
+screen_diagnostic.json
+momentum_lab.json
+ml_vs_momentum.json
+blind_validation.csv
+quality_screen.json
+veto_test.json
+
+# Backups
+*.backup_*
+*_CURRENT_*
+*_OLD_*
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
