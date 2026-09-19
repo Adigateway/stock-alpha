@@ -146,6 +146,25 @@ nav{background:var(--s1);border-bottom:1px solid var(--b1);padding:0 1.5rem;disp
 .pstat-label{font-size:9px;color:var(--t3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.06em;font-family:var(--fn)}
 .pstat-val{font-size:13px;font-weight:600;font-family:var(--fn)}
 
+/* MONTE CARLO */
+.mc-card{background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);padding:16px 18px;margin-bottom:1.25rem}
+.mc-controls{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.mc-cap{display:flex;align-items:center;gap:8px;font-family:var(--fn);font-size:10px;color:var(--t3);letter-spacing:.06em}
+.mc-cap input{background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);color:var(--text);font-family:var(--fn);font-size:12px;padding:5px 8px;width:110px}
+.mc-cap input:focus{border-color:var(--purple)}
+.mc-outcomes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+.mc-out{background:var(--s1);border:1px solid var(--b1);border-radius:var(--radius);padding:10px 12px}
+.mc-out-val{font-family:var(--fn);font-size:18px;font-weight:600;margin:4px 0 2px}
+.mc-out-chg{font-family:var(--fn);font-size:10px;color:var(--t2)}
+.mc-out-desc{font-size:10px;color:var(--t3);line-height:1.5;margin-top:6px}
+.mc-chart-wrap{position:relative}
+.mc-tip{position:absolute;top:0;pointer-events:none;background:var(--s3);border:1px solid var(--b2);border-radius:var(--radius);padding:6px 9px;font-family:var(--fn);font-size:10px;color:var(--t2);line-height:1.6;display:none;white-space:nowrap}
+.mc-tip b{color:var(--text);font-weight:500}
+.mc-foot{font-size:10px;color:var(--t3);font-family:var(--fn);line-height:1.6;margin-top:10px}
+.mc-inputs{display:flex;gap:16px;flex-wrap:wrap;font-family:var(--fn);font-size:10px;color:var(--t3);margin-bottom:12px}
+.mc-inputs span{color:var(--t2)}
+@media(max-width:800px){.mc-outcomes,.pgrid{grid-template-columns:repeat(2,1fr)}}
+
 .run-card{background:var(--s2);border:1px solid var(--b1);border-radius:var(--radius);margin-bottom:8px;overflow:hidden}
 .run-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;cursor:pointer;font-family:var(--fn)}
 .run-header:hover{background:var(--s3)}
@@ -364,7 +383,7 @@ nav{background:var(--s1);border-bottom:1px solid var(--b1);padding:0 1.5rem;disp
 <div id="page-portfolio" class="page">
   <div class="page-head">
     <div class="page-title">MY PORTFOLIO</div>
-    <div class="page-sub">Tracked tickers — rank updates each quarterly refresh</div>
+    <div class="page-sub">Tracked tickers and a 1-year Monte Carlo risk projection — reruns whenever the portfolio changes</div>
   </div>
   <div id="portfolio-content"></div>
 </div>
@@ -483,6 +502,7 @@ async function loadPredictions(){
     validation = await get('/api/validation').catch(()=>null);
     renderDashboard();
     renderLandingStats();
+    if(document.getElementById('page-portfolio').classList.contains('active')) renderPortfolio();
   }catch(e){
     document.getElementById('stocks-container').innerHTML =
       `<div class="loading">Error: ${e.message}<br><br>Run live_signals.py on the server.</div>`;
@@ -662,7 +682,7 @@ function closeModal(){document.getElementById('modal-overlay').classList.remove(
 function togglePort(t){
   const s=allStocks.find(x=>x.ticker===t); if(!s)return;
   if(portfolio[t]){delete portfolio[t];toast(t+' removed');}
-  else{portfolio[t]={ticker:t,sector:s.sector,rank:s.mom_rank,mom:s.mom_6m_true,addedDate:new Date().toISOString().slice(0,10),addedRank:s.mom_rank};toast(t+' tracked');}
+  else{portfolio[t]={ticker:t,sector:s.sector,rank:s.mom_rank,mom:s.mom_6m_true,vol:s.vol_annualized,addedDate:new Date().toISOString().slice(0,10),addedRank:s.mom_rank};toast(t+' tracked');}
   savePortfolio();
   renderDashboard(searchMode?currentSearch:null);
   if(document.getElementById('page-portfolio').classList.contains('active'))renderPortfolio();
@@ -678,11 +698,13 @@ function renderPortfolio(){
     <div class="stat-card"><div class="stat-label">Currently in top 15</div><div class="stat-value green">${inTop}</div></div>
     <div class="stat-card"><div class="stat-label">Losing money</div><div class="stat-value ${losing?'red':'green'}">${losing}</div></div>
     <div class="stat-card"><div class="stat-label">Next refresh</div><div class="stat-value" style="font-size:13px">${nextQuarter()}</div></div>
-  </div>`;
+  </div>
+  <div class="mc-card" id="mc-card"></div>
+  <div class="sec-header">HOLDINGS<div class="sec-line"></div><span>equal weight</span></div>`;
   keys.forEach(k=>{
     const p=portfolio[k], s=allStocks.find(x=>x.ticker===k)||{};
     const curRank=s.mom_rank??p.rank, drift=p.addedRank-curRank;
-    const sg=sigCls(s.signal);
+    const sg=sigCls(s.signal), vol=s.vol_annualized??p.vol;
     c.innerHTML+=`<div class="port-card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -698,14 +720,162 @@ function renderPortfolio(){
       </div>
       <div style="margin-bottom:8px">${sparkline(s,110,32)}</div>
       <div class="pgrid">
-        <div class="pstat"><div class="pstat-label">Rank now</div><div class="pstat-val">#${curRank}</div></div>
-        <div class="pstat"><div class="pstat-label">Rank when added</div><div class="pstat-val">#${p.addedRank}</div></div>
+        <div class="pstat"><div class="pstat-label">Rank now</div><div class="pstat-val">#${curRank} <span style="font-size:10px;color:var(--t3);font-weight:400">from #${p.addedRank}</span></div></div>
         <div class="pstat"><div class="pstat-label">Rank drift</div><div class="pstat-val ${drift>=0?'green':'red'}">${drift>=0?'+':''}${drift}</div></div>
-        <div class="pstat"><div class="pstat-label">6M return</div><div class="pstat-val ${(s.mom_6m_true||0)>=0?'green':'red'}">${sp(s.mom_6m_true||0)}</div></div>
+        <div class="pstat"><div class="pstat-label">6M return <span style="text-transform:none">(μ)</span></div><div class="pstat-val ${(s.mom_6m_true||0)>=0?'green':'red'}">${sp(s.mom_6m_true||0)}</div></div>
+        <div class="pstat"><div class="pstat-label">Ann. volatility <span style="text-transform:none">(σ)</span></div><div class="pstat-val">${Number.isFinite(vol)?pct(vol):'—'}</div></div>
       </div>
     </div>`;
   });
+  // After the += loop above, which re-parses the container and would drop listeners
+  renderMonteCarlo(keys);
 }
+
+// ═══ MONTE CARLO ════════════════════════════════════════════════════════════
+// Treats the equal-weight portfolio as one asset following Geometric Brownian
+// Motion:  V(t+Δt) = V(t) · exp((μ − σ²/2)Δt + σ√Δt · Z),  Z ~ N(0,1)
+//   μ = mean of each holding's annualized drift, σ = mean annualized volatility.
+// Averaging σ assumes the holdings move together (no diversification credit),
+// so the spread shown is on the wide, conservative side.
+const MC_PATHS = 1000, MC_DAYS = 252, MARKET_DRIFT = 0.08;
+let mcCapital = 10000, mcDrift = 'momentum';
+try{ mcCapital = Number(localStorage.getItem('sa_mc_capital')) || 10000; mcDrift = localStorage.getItem('sa_mc_drift') || 'momentum'; }catch(e){}
+
+const fmtUSD = v => '$' + Math.round(v).toLocaleString('en-US');
+
+// Seeded PRNG so the same portfolio always yields the same numbers
+function mulberry32(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+function hashStr(s){let h=2166136261;for(const c of s){h^=c.charCodeAt(0);h=Math.imul(h,16777619);}return h>>>0;}
+
+function portfolioInputs(keys){
+  const rows = keys.map(k=>{
+    const s=allStocks.find(x=>x.ticker===k)||{}, p=portfolio[k]||{};
+    return {ticker:k, r6:s.mom_6m_true??p.mom, vol:s.vol_annualized??p.vol};
+  }).filter(r=>Number.isFinite(r.r6) && r.r6>-1 && Number.isFinite(r.vol) && r.vol>0);
+  if(!rows.length) return null;
+  // 6-month return → annualized continuous drift: ln(1+r6) × 2
+  const muMom = rows.reduce((a,r)=>a+2*Math.log(1+r.r6),0)/rows.length;
+  const sigma = rows.reduce((a,r)=>a+r.vol,0)/rows.length;
+  return {rows, sigma, muMom, mu: mcDrift==='momentum' ? muMom : MARKET_DRIFT,
+          skipped: keys.filter(k=>!rows.some(r=>r.ticker===k))};
+}
+
+function simulate(capital, mu, sigma, seed){
+  const t0=performance.now(), rnd=mulberry32(seed), dt=1/MC_DAYS;
+  const drift=(mu-sigma*sigma/2)*dt, shock=sigma*Math.sqrt(dt);
+  const v=new Float64Array(MC_PATHS).fill(capital), tmp=new Float64Array(MC_PATHS);
+  const q=(a,p)=>a[Math.min(a.length-1,Math.floor(p*a.length))];
+  const band=[{d:0,p5:capital,p25:capital,p50:capital,p75:capital,p95:capital}];
+  let spare=null;
+  const gauss=()=>{ // Box–Muller, both outputs used
+    if(spare!==null){const z=spare;spare=null;return z;}
+    let u=0;while(u===0)u=rnd();
+    const r=Math.sqrt(-2*Math.log(u)), th=2*Math.PI*rnd();
+    spare=r*Math.sin(th); return r*Math.cos(th);
+  };
+  for(let d=1;d<=MC_DAYS;d++){
+    for(let i=0;i<MC_PATHS;i++) v[i]*=Math.exp(drift+shock*gauss());
+    if(d%6===0||d===MC_DAYS){ // weekly-ish percentile band is plenty for the chart
+      tmp.set(v); tmp.sort();
+      band.push({d,p5:q(tmp,.05),p25:q(tmp,.25),p50:q(tmp,.5),p75:q(tmp,.75),p95:q(tmp,.95)});
+    }
+  }
+  tmp.set(v); tmp.sort();
+  let losers=0; for(let i=0;i<MC_PATHS;i++) if(tmp[i]<capital) losers++;
+  return {band, p5:q(tmp,.05), p50:q(tmp,.5), p95:q(tmp,.95), pLoss:losers/MC_PATHS, ms:performance.now()-t0};
+}
+
+function renderMonteCarlo(keys){
+  const card=document.getElementById('mc-card'); if(!card) return;
+  const inp=portfolioInputs(keys);
+  if(!inp){card.innerHTML=`<div class="chart-title">Monte Carlo projection</div><div class="mc-foot">Waiting for return and volatility data for these tickers${allStocks.length?' — none of them have both in the current ranking.':'…'}</div>`;return;}
+  const seed=hashStr(inp.rows.map(r=>r.ticker).sort().join(',')+mcDrift+mcCapital);
+  const r=simulate(mcCapital, inp.mu, inp.sigma, seed);
+  const chg=v=>{const x=v/mcCapital-1;return `<span class="${x>=0?'green':'red'}">${sp(x)}</span> vs start`;};
+
+  card.innerHTML=`
+    <div class="mc-controls">
+      <div class="chart-title" style="margin:0">Monte Carlo · 1-year projection</div>
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <label class="mc-cap">INITIAL CAPITAL $<input type="number" min="100" step="1000" value="${mcCapital}" onchange="setMcCapital(this.value)"></label>
+        <div class="pills" style="margin:0">
+          <div class="pill ${mcDrift==='momentum'?'active':''}" onclick="setMcDrift('momentum')" title="Drift = each stock's 6-month return, annualized">MOMENTUM DRIFT</div>
+          <div class="pill ${mcDrift==='market'?'active':''}" onclick="setMcDrift('market')" title="Drift = 8% a year, a long-run market average">MARKET 8% DRIFT</div>
+        </div>
+      </div>
+    </div>
+    <div class="mc-inputs">
+      <div>HOLDINGS <span>${inp.rows.length}</span></div>
+      <div>DRIFT μ <span>${pct(inp.mu)}/yr</span></div>
+      <div>AVG VOL σ <span>${pct(inp.sigma)}/yr</span></div>
+      <div>PATHS <span>${MC_PATHS.toLocaleString()} × ${MC_DAYS} days</span></div>
+      <div>COMPUTED IN <span>${r.ms.toFixed(1)} ms</span></div>
+    </div>
+    <div class="mc-outcomes">
+      <div class="mc-out"><div class="stat-label">Initial capital</div><div class="mc-out-val">${fmtUSD(mcCapital)}</div><div class="mc-out-chg">equal weight</div><div class="mc-out-desc">Baseline investment, split evenly across holdings.</div></div>
+      <div class="mc-out" style="border-left:2px solid var(--red)"><div class="stat-label">Bearish · 5th pct</div><div class="mc-out-val">${fmtUSD(r.p5)}</div><div class="mc-out-chg">${chg(r.p5)}</div><div class="mc-out-desc">In 95% of simulated paths the portfolio ended above this. Value-at-Risk (95%): ${fmtUSD(Math.max(0,mcCapital-r.p5))}.</div></div>
+      <div class="mc-out" style="border-left:2px solid var(--purple)"><div class="stat-label">Expected · median</div><div class="mc-out-val">${fmtUSD(r.p50)}</div><div class="mc-out-chg">${chg(r.p50)}</div><div class="mc-out-desc">The central outcome if the ${mcDrift==='momentum'?'recent trend continues':'market-average drift holds'}.</div></div>
+      <div class="mc-out" style="border-left:2px solid var(--green)"><div class="stat-label">Bullish · 95th pct</div><div class="mc-out-val">${fmtUSD(r.p95)}</div><div class="mc-out-chg">${chg(r.p95)}</div><div class="mc-out-desc">The top 5% of paths — momentum accelerates.</div></div>
+    </div>
+    <div class="mc-chart-wrap">
+      <svg id="mc-chart" width="100%" viewBox="0 0 640 220" style="display:block;overflow:visible"></svg>
+      <div class="mc-tip" id="mc-tip"></div>
+    </div>
+    <div class="mc-foot">
+      ${(r.pLoss*100).toFixed(0)}% of paths end below the starting capital.
+      Shaded bands: 5th–95th and 25th–75th percentile. A projection from past volatility, not a forecast —
+      ${mcDrift==='momentum'?'momentum drift assumes the last six months repeat, which historically is optimistic.':'the 8% drift ignores these stocks\' recent returns entirely.'}
+      Volatility is averaged, so diversification between holdings is not credited.
+      ${inp.skipped.length?`<br><span class="amber">Excluded (no volatility data): ${inp.skipped.join(', ')}</span>`:''}
+    </div>`;
+  drawFan(r.band, mcCapital);
+}
+
+function drawFan(band, capital){
+  const svg=document.getElementById('mc-chart'), tip=document.getElementById('mc-tip'); if(!svg) return;
+  const W=640,H=220,L=62,R=76,T=10,B=24, pw=W-L-R, ph=H-T-B;
+  let lo=Math.min(capital,...band.map(b=>b.p5)), hi=Math.max(capital,...band.map(b=>b.p95));
+  const pad=(hi-lo)*0.06||capital*0.05; lo=Math.max(0,lo-pad); hi+=pad;
+  const X=d=>L+d/MC_DAYS*pw, Y=v=>T+(1-(v-lo)/(hi-lo))*ph;
+  const line=k=>band.map((b,i)=>`${i?'L':'M'}${X(b.d).toFixed(1)},${Y(b[k]).toFixed(1)}`).join('');
+  const area=(a,b)=>line(b)+band.slice().reverse().map(p=>`L${X(p.d).toFixed(1)},${Y(p[a]).toFixed(1)}`).join('')+'Z';
+  const mono='font-family="IBM Plex Mono" font-size="9"';
+  let h='';
+  for(let i=0;i<=3;i++){ // recessive grid
+    const v=lo+(hi-lo)*i/3, y=Y(v);
+    h+=`<line x1="${L}" x2="${L+pw}" y1="${y}" y2="${y}" stroke="var(--b1)" stroke-width="1"/>`;
+    h+=`<text x="${L-8}" y="${y+3}" text-anchor="end" fill="var(--t3)" ${mono}>${fmtUSD(v)}</text>`;
+  }
+  ['NOW','3M','6M','9M','12M'].forEach((t,i)=>h+=`<text x="${X(i*MC_DAYS/4)}" y="${H-6}" text-anchor="middle" fill="var(--t3)" ${mono}>${t}</text>`);
+  h+=`<path d="${area('p5','p95')}" fill="var(--purple)" opacity=".13"/>`;
+  h+=`<path d="${area('p25','p75')}" fill="var(--purple)" opacity=".22"/>`;
+  h+=`<line x1="${L}" x2="${L+pw}" y1="${Y(capital)}" y2="${Y(capital)}" stroke="var(--t3)" stroke-width="1" stroke-dasharray="3 3"/>`;
+  h+=`<path d="${line('p95')}" fill="none" stroke="var(--green)" stroke-width="1" opacity=".7"/>`;
+  h+=`<path d="${line('p5')}" fill="none" stroke="var(--red)" stroke-width="1" opacity=".7"/>`;
+  h+=`<path d="${line('p50')}" fill="none" stroke="var(--purple)" stroke-width="2" stroke-linecap="round"/>`;
+  // Direct labels at the right edge, nudged apart if they collide
+  const end=band[band.length-1], labs=[['95th',end.p95],['Median',end.p50],['5th',end.p5]].map(([n,v])=>({n,v,y:Y(v)}));
+  for(let i=1;i<labs.length;i++) if(labs[i].y-labs[i-1].y<22) labs[i].y=labs[i-1].y+22;
+  labs.forEach(l=>h+=`<text x="${L+pw+8}" y="${l.y-1}" fill="var(--t2)" ${mono}>${l.n}</text><text x="${L+pw+8}" y="${l.y+9}" fill="var(--text)" ${mono}>${fmtUSD(l.v)}</text>`);
+  h+=`<line id="mc-cross" x1="0" x2="0" y1="${T}" y2="${T+ph}" stroke="var(--t2)" stroke-width="1" opacity="0"/>`;
+  h+=`<rect x="${L}" y="${T}" width="${pw}" height="${ph}" fill="transparent" id="mc-hit"/>`;
+  svg.innerHTML=h;
+
+  const hit=svg.querySelector('#mc-hit'), cross=svg.querySelector('#mc-cross');
+  hit.addEventListener('mousemove',e=>{
+    const rc=svg.getBoundingClientRect(), sx=(e.clientX-rc.left)*W/rc.width;
+    const d=Math.max(0,Math.min(MC_DAYS,(sx-L)/pw*MC_DAYS));
+    const b=band.reduce((a,c)=>Math.abs(c.d-d)<Math.abs(a.d-d)?c:a);
+    const px=X(b.d); cross.setAttribute('x1',px); cross.setAttribute('x2',px); cross.setAttribute('opacity','.5');
+    tip.innerHTML=`Day <b>${b.d}</b> of ${MC_DAYS}<br>95th <b>${fmtUSD(b.p95)}</b><br>Median <b>${fmtUSD(b.p50)}</b><br>5th <b>${fmtUSD(b.p5)}</b>`;
+    tip.style.display='block';
+    const left=px*rc.width/W; tip.style.left=(left>rc.width*0.6?left-tip.offsetWidth-10:left+10)+'px';
+  });
+  hit.addEventListener('mouseleave',()=>{tip.style.display='none';cross.setAttribute('opacity','0');});
+}
+
+function setMcCapital(v){v=Math.round(Number(v));if(!(v>=100))return;mcCapital=v;try{localStorage.setItem('sa_mc_capital',v);}catch(e){}renderMonteCarlo(Object.keys(portfolio));}
+function setMcDrift(m){mcDrift=m;try{localStorage.setItem('sa_mc_drift',m);}catch(e){}renderMonteCarlo(Object.keys(portfolio));}
 
 function nextQuarter(){
   const n=new Date(), y=n.getFullYear(), m=n.getMonth();

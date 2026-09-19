@@ -113,11 +113,24 @@ corrected.
 
 ---
 
+## Portfolio risk projection
+
+The PORTFOLIO tab runs a Monte Carlo simulation in the browser whenever a
+ticker is added or removed: 1,000 Geometric Brownian Motion paths over 252
+trading days, using the portfolio's average drift (μ, from each stock's
+annualized 6-month return) and average annualized volatility (σ, from 126 days
+of daily returns). It shows the 5th percentile (Value-at-Risk), median and 95th
+percentile outcomes for a chosen starting capital, with a toggle to an 8%
+market drift. Momentum drift assumes the last six months repeat, which is
+optimistic. Averaging σ gives no diversification credit, so the range is wide.
+
+---
+
 ## Layout
 
 ```
 pipeline/
-  stock_alpha.py        8-stage data pipeline
+  stock_alpha.py        3-stage data pipeline (financials, prices, fundamentals)
   live_signals.py       momentum ranking, writes to Postgres
 research/
   13_screen_diagnostic  data quality audit
@@ -129,6 +142,7 @@ webapp/
   index.html            frontend, single file
 scripts/
   run_pipeline.sh       quarterly cron runner
+  cleanup_db.py         one-off: drop tables left over from the ML pipeline
 config/
   db_config.example.py  template — copy and fill in
 data/
@@ -151,16 +165,23 @@ GRANT ALL ON SCHEMA public TO stockuser;
 First run, in order. Stage 1 is slow — one SEC request per ticker.
 
 ```bash
-python3 pipeline/stock_alpha.py --only 1   # SEC filings
-python3 pipeline/stock_alpha.py --only 2   # prices
-python3 pipeline/stock_alpha.py --only 3   # ratios
-python3 pipeline/stock_alpha.py --only 4   # price features
-python3 pipeline/stock_alpha.py --only 6   # model dataset
-python3 pipeline/live_signals.py           # ranking
+python3 pipeline/stock_alpha.py --only 1   # SEC filings (last 3 years, 7 fields)
+python3 pipeline/stock_alpha.py --only 2   # daily closes (last 2 years)
+python3 pipeline/stock_alpha.py --only 3   # latest fundamentals, one row per ticker
+python3 pipeline/live_signals.py           # ranking + annualized volatility
 ```
 
-Stages 5, 7 and 8 exist but are unused — sentiment failed ablation, and 7 and 8
-trained and backtested the removed ML model.
+The pipeline collects only what the ranking and website use. Sentiment, the
+ML training/backtest stages and the full-history feature tables were removed.
+To drop their leftover tables from an existing database (dry run first):
+
+```bash
+python3 scripts/cleanup_db.py          # lists what would be dropped
+python3 scripts/cleanup_db.py --yes    # drops it
+```
+
+The `research/` scripts read `model_dataset_clean`, which no longer exists —
+they are kept as the record of how the strategy was chosen, not to be rerun.
 
 Quarterly automation:
 

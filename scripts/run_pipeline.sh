@@ -2,12 +2,10 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # run_pipeline.sh — quarterly refresh, called by cron
 #
-# Stages 5 (sentiment), 7 (ML training) and 8 (ML backtest) are skipped.
-# Sentiment failed ablation and is unused. The ML model was removed after blind
-# validation scored it at AUC 0.50.
+# stock_alpha.py has three stages: SEC financials, Yahoo prices, and a
+# one-row-per-ticker fundamentals snapshot. live_signals.py then ranks.
 #
 # Stage 1 is the slowest — one SEC request per ticker with a rate limit.
-# Budget 40-60 minutes for the whole run.
 #
 # Cron entry (crontab -e):
 #   0 2 1 1,4,7,10 * /home/aditya/stock_alpha/run_pipeline.sh
@@ -41,11 +39,9 @@ stage () {
   fi
 }
 
-stage "Stage 1 — SEC financials"      python3 stock_alpha.py --only 1
-stage "Stage 2 — Yahoo prices"        python3 stock_alpha.py --only 2
-stage "Stage 3 — fundamental ratios"  python3 stock_alpha.py --only 3
-stage "Stage 4 — price features"      python3 stock_alpha.py --only 4
-stage "Stage 6 — model dataset"       python3 stock_alpha.py --only 6
+stage "Stage 1 — SEC financials"       python3 stock_alpha.py --only 1
+stage "Stage 2 — Yahoo prices"         python3 stock_alpha.py --only 2
+stage "Stage 3 — fundamentals snapshot" python3 stock_alpha.py --only 3
 
 # Only rank if the data rebuilt cleanly — a partial refresh would produce a
 # ranking from stale or half-written tables.
