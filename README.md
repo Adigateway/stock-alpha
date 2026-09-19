@@ -1,159 +1,102 @@
 # Stock Alpha
 
-A momentum screen for S&P 500 stocks, with the full record of what was tried
-and what failed.
+A momentum screen for S&P 500 stocks. Every quarter it ranks the index by how
+strongly each stock has been rising, relative to how bumpy the ride was, and
+shows the top 15. A portfolio tab simulates what a basket of those stocks
+might be worth in a year.
 
-Ranks the universe by six-month price return and surfaces the top fifteen.
-One feature, no model, no tuning. It arrived there by elimination.
-
----
-
-## What it does
-
-```
-SEC EDGAR + Yahoo Finance  ->  PostgreSQL  ->  rank by 6M return  ->  web UI
-```
-
-Runs quarterly via cron. Fundamentals are stored and displayed for screening
-but play no part in the ranking.
+Personal research project. Not financial advice.
 
 ---
 
-## What was tested and removed
+## The idea
 
-The interesting part of this project is the negative results.
+**1. Collect only what's needed.** Daily closing prices for the last two years
+(Yahoo Finance) and seven numbers per quarter from company filings (SEC EDGAR):
+revenue, operating income, net income, assets, equity, operating cash flow and
+shares outstanding.
 
-| Approach | Result |
+**2. Filter.** Drop companies that are losing money (return on assets ≤ 0) or
+are smaller than $300M in market value.
+
+**3. Score.** For each remaining stock:
+
+```
+score = 6-month return (skipping the most recent month) ÷ annualized volatility
+```
+
+- *6-month return, skipping the latest month:* the price change from seven
+  months ago to one month ago. The latest month is skipped because very
+  short-term moves tend to reverse.
+- *Annualized volatility:* how much the price swings day to day, measured over
+  the last ~126 trading days and scaled to a year.
+
+Dividing by volatility rewards steady climbers over stocks that got there by
+lurching around.
+
+**4. Rank.** Highest score first. The top 15 are marked BUY. Profitability,
+growth and margins are shown next to each stock for your own judgement, but
+only the filter in step 2 uses them.
+
+**5. Simulate a portfolio.** Add stocks with **+** and the PORTFOLIO tab runs a
+Monte Carlo simulation in the browser:
+
+- It averages the stocks' yearly trend (μ) and volatility (σ).
+- It plays out 1,000 possible years, day by day for 252 trading days. Each day
+  the value moves by the trend plus a random shock sized by σ (Geometric
+  Brownian Motion).
+- It sorts the 1,000 end values and reports the **5th percentile** (bad case:
+  95% of runs ended above it), the **median** (typical case) and the
+  **95th percentile** (good case), for whatever starting amount you enter.
+
+By default the trend is taken from each stock's recent 6-month return, which
+assumes the recent run continues. That is optimistic. A toggle switches to a
+flat 8% market average instead.
+
+```
+SEC EDGAR + Yahoo Finance → PostgreSQL → filter → score → rank → web app
+                                                        portfolio → Monte Carlo
+```
+
+---
+
+## How it got here
+
+An earlier version was much bigger: a machine-learning model on 38 features,
+news sentiment from company filings, and several fundamental screens. Each was
+tested and removed.
+
+| Tried | Why it was dropped |
 |---|---|
-| Gradient-boosted model, 38 features | AUC 0.50 under blind validation. Removed. |
-| Fundamental hard gates | Gated universe returned 8.74% vs market 9.36% |
-| Sector-relative quality ranking | 10.28% vs 11.56% for gates + momentum |
-| Multi-failure veto | Vetoed stocks returned 24.86% vs the 13.82% that replaced them |
-| SEC 8-K sentiment (VADER + TF-IDF) | Failed ablation, added noise |
-| Macro regime features (FRED) | Reduced OOS AUC |
-| Six momentum variants | None beat plain 6-month return |
+| Machine-learning model (38 features) | Blind test scored AUC 0.50, the same as a coin flip |
+| Fundamental screens (3 variants) | Each one lowered returns compared with momentum alone |
+| Filing sentiment (VADER, TF-IDF) | Added noise, no signal |
+| Macro-economic features | Made results worse |
+| Other momentum variants | None beat the simple 6-month return |
 
-Each was measured, not assumed. Scripts are in `research/`.
+What survived is plain 6-month momentum. In a blind test over five snapshots
+(2021–2025, top 15 held six months) it returned **24.2% vs 9.9%** for the whole
+index and beat it in 3 of 5. The two losing years were 2021 and 2022, and 2025
+(the AI rally) carries most of the average. Without 2025 the edge is about
++5%. Transaction costs are not included.
 
-### Why the ML model went
+These numbers are for plain momentum. The current version adds the
+profitability filter and the volatility adjustment and has **not** been
+blind-tested yet.
 
-Blind validation across five snapshots, training stopped six months before
-each one:
+Bugs fixed along the way included the SEC parser reading only the first
+matching tag (Apple, Nvidia and JPMorgan had no data), ~40% of stocks
+silently dropped for missing share counts, and filings being used ~45 days
+before they were public.
 
-```
-momentum_only        AUC 0.4999   rank corr +0.007
-current_production   AUC 0.5089   rank corr +0.019
-full (38 features)   AUC 0.5034   rank corr -0.002
-```
-
-AUC 0.50 over roughly 1,375 stock-outcome pairs is a coin flip. The three
-feature sets also picked almost entirely different stocks on the same date,
-which is what fitting noise looks like.
-
-An earlier walk-forward test showed 17.92%, but it trained on rows whose
-six-month outcomes were not yet known. That was leakage, not edge.
-
-### Why fundamentals failed
-
-Consistent with the literature. Piotroski's F-Score, the canonical fundamental
-screen, was tested by firm size in the original 1999 paper: small firms showed
-a 27.0% annual spread, large firms 1.7% and not statistically significant.
-The S&P 500 is the one segment where fundamental screening has no documented
-edge — every name has dozens of analysts already covering it.
+The scripts behind all of this are in `research/`. They read tables the
+current pipeline no longer builds, so they are kept as a record, not to rerun.
 
 ---
 
-## Performance
+## Running it
 
-Blind validation, five snapshots 2021-2025, top 15 held six months:
-
-| | Return | vs universe |
-|---|---|---|
-| Momentum | 24.16% | +14.25% |
-| Universe | 9.91% | — |
-
-Beat the universe in 3 of 5. Per snapshot:
-
-```
-2021   -11.66%
-2022    -2.26%
-2023   +26.07%
-2024    +8.60%
-2025   +50.50%
-```
-
-Two of five negative, and 2025 carries most of the average — that was the AI
-and semiconductor rally. Excluding it the edge is roughly +5%. No transaction
-costs are included and turnover runs near 40% a month.
-
----
-
-## Bugs found along the way
-
-Most of the work was debugging, not modelling.
-
-**SEC extraction.** A `break` in the tag loop meant only the first matching
-XBRL tag was ever read. Large filers moved from `Revenues` to the ASC 606 tag
-around 2018 but kept stale legacy entries, so the loop found the old tag and
-stopped. Apple, Nvidia and JPMorgan had zero rows; Microsoft had 8 quarters
-ending 2010. Fixing it took the dataset from 8,438 rows to 14,798.
-
-**Silent universe deletion.** `shares_outstanding` was missing on half of
-filings, making `market_cap` NaN, which the microcap filter then dropped.
-Roughly 40% of the universe was being excluded by accident.
-
-**Look-ahead in the merge.** The SEC `end` field is the quarter's period end,
-not the filing date. Fundamentals were being read ~45 days before they were
-public. Fixed with an explicit lag.
-
-**Cross-sectional rank bug.** `mom_6m_rank` was grouped by ticker instead of
-date, ranking each stock against its own history rather than the market. That
-column was one of four surviving the ablation and was worth 4.4% a year once
-corrected.
-
----
-
-## Portfolio risk projection
-
-The PORTFOLIO tab runs a Monte Carlo simulation in the browser whenever a
-ticker is added or removed: 1,000 Geometric Brownian Motion paths over 252
-trading days, using the portfolio's average drift (μ, from each stock's
-annualized 6-month return) and average annualized volatility (σ, from 126 days
-of daily returns). It shows the 5th percentile (Value-at-Risk), median and 95th
-percentile outcomes for a chosen starting capital, with a toggle to an 8%
-market drift. Momentum drift assumes the last six months repeat, which is
-optimistic. Averaging σ gives no diversification credit, so the range is wide.
-
----
-
-## Layout
-
-```
-pipeline/
-  stock_alpha.py        3-stage data pipeline (financials, prices, fundamentals)
-  live_signals.py       momentum ranking, writes to Postgres
-research/
-  13_screen_diagnostic  data quality audit
-  16_momentum_lab       nine momentum variants
-  17_ml_vs_momentum     walk-forward head-to-head
-  18_blind_validation   blind snapshots, no look-ahead
-webapp/
-  api.py                Flask API
-  index.html            frontend, single file
-scripts/
-  run_pipeline.sh       quarterly cron runner
-  cleanup_db.py         one-off: drop tables left over from the ML pipeline
-config/
-  db_config.example.py  template — copy and fill in
-data/
-  ticker_sectors.csv    universe definition
-```
-
----
-
-
-
-PostgreSQL:
+PostgreSQL setup:
 
 ```sql
 CREATE DATABASE stock_alpha;
@@ -162,57 +105,54 @@ GRANT ALL PRIVILEGES ON DATABASE stock_alpha TO stockuser;
 GRANT ALL ON SCHEMA public TO stockuser;
 ```
 
-First run, in order. Stage 1 is slow — one SEC request per ticker.
+Copy `config/db_config.example.py` to `db_config.py` and fill it in. Set
+`USER_AGENT` in `pipeline/stock_alpha.py` to a real email address (SEC
+requires it). Then:
 
 ```bash
-python3 pipeline/stock_alpha.py --only 1   # SEC filings (last 3 years, 7 fields)
-python3 pipeline/stock_alpha.py --only 2   # daily closes (last 2 years)
-python3 pipeline/stock_alpha.py --only 3   # latest fundamentals, one row per ticker
-python3 pipeline/live_signals.py           # ranking + annualized volatility
+python3 pipeline/stock_alpha.py      # 1 filings, 2 prices, 3 fundamentals (stage 1 is slow)
+python3 pipeline/live_signals.py     # filter, score, rank
 ```
 
-The pipeline collects only what the ranking and website use. Sentiment, the
-ML training/backtest stages and the full-history feature tables were removed.
-To drop their leftover tables from an existing database (dry run first):
-
-```bash
-python3 scripts/cleanup_db.py          # lists what would be dropped
-python3 scripts/cleanup_db.py --yes    # drops it
-```
-
-The `research/` scripts read `model_dataset_clean`, which no longer exists —
-they are kept as the record of how the strategy was chosen, not to be rerun.
-
-Quarterly automation:
+Refresh quarterly with cron:
 
 ```
 0 2 1 1,4,7,10 * /path/to/scripts/run_pipeline.sh
 ```
 
-Web app: Gunicorn on `api.py` behind Nginx, serving `index.html`.
+Web app: Gunicorn on `webapp/api.py` behind Nginx, serving `webapp/index.html`.
+
+Upgrading a database built by the old version? Remove its leftover tables:
+
+```bash
+python3 scripts/cleanup_db.py          # shows what would be dropped
+python3 scripts/cleanup_db.py --yes    # drops it
+```
 
 ---
 
-## Notes
+## Layout
 
-The pipeline paths are absolute (`/home/aditya/stock_alpha`) and would need
-changing for another machine.
+```
+pipeline/stock_alpha.py    collect data: filings, prices, fundamentals
+pipeline/live_signals.py   filter, score and rank
+webapp/api.py              Flask API
+webapp/index.html          website, including the Monte Carlo
+scripts/run_pipeline.sh    quarterly cron job
+scripts/cleanup_db.py      one-off cleanup after upgrading
+research/                  the old experiments
+config/                    database config template
+data/ticker_sectors.csv    the stock universe
+```
 
-SEC EDGAR requires a real contact address in the User-Agent header — set
-`USER_AGENT` in `stock_alpha.py` before running stage 1.
-
-`yfinance` is unofficial and occasionally breaks with Yahoo's changes.
+Paths are hard-coded to `/home/aditya/stock_alpha`. `yfinance` is unofficial
+and occasionally breaks.
 
 ---
 
 ## Disclaimer
 
-Personal research project. Not financial advice.
-
-Momentum ranks by price, not business quality — the list regularly contains
-companies that are losing money, and they are labelled as such. It also
-concentrates heavily in whichever sector is running, which is the opposite of
-diversification.
-
-Historical results do not predict future performance, and this record covers a
-single market regime with no prolonged bear market in it.
+Momentum ranks by price, not business quality, and tends to pile into
+whichever sector is hot. The Monte Carlo is a spread of outcomes based on past
+volatility, not a prediction. Past results cover one market period with no
+long bear market. Don't invest based on this tool alone.
